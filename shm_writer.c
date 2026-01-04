@@ -1,22 +1,51 @@
-// POSIX Shared Memory + Semaphore Writer
 #include <stdio.h>
+#include <stdlib.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <semaphore.h>
 #include <unistd.h>
-#include <string.h>
+#include <sys/wait.h>
+
+#define MAX 1024
+
+typedef struct {
+    int count;
+    int data[MAX];
+} shm_block;
+
+// Declaration from shm_reader.c
+void filter(const char *shm_name, const char *sem_name);
 
 int main() {
-    int fd = shm_open("/myshm", O_CREAT | O_RDWR, 0666);
-    ftruncate(fd, 1024);
-    char *ptr = (char *)mmap(0, 1024, PROT_WRITE, MAP_SHARED, fd, 0);
+    const char *shm_name = "/shm_start";
+    const char *sem_name = "/sem_start";
 
-    sem_t *sem = sem_open("/mysem", O_CREAT, 0666, 0);
-    strcpy(ptr, "Hello Shared Memory");
-    sem_post(sem);
+    int fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
+    ftruncate(fd, sizeof(shm_block));
 
-    munmap(ptr, 1024);
+    shm_block *shm = mmap(NULL, sizeof(shm_block),
+                          PROT_WRITE, MAP_SHARED, fd, 0);
+
+    shm->count = 0;
+    for (int i = 2; i <= 1000; i++) {
+        shm->data[shm->count++] = i;
+    }
+
+    sem_t *sem = sem_open(sem_name, O_CREAT, 0666, 0);
+
+    if (fork() == 0) {
+        filter(shm_name, sem_name);
+    } else {
+        sem_post(sem);
+        wait(NULL);
+    }
+
+    munmap(shm, sizeof(shm_block));
     close(fd);
     sem_close(sem);
+
+    shm_unlink(shm_name);
+    sem_unlink(sem_name);
+
     return 0;
 }
